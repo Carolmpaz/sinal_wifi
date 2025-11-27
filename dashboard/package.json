@@ -1,0 +1,23 @@
+{
+  "name": "esp32-mqtt-dashboard",
+  "version": "1.0.0",
+  "description": "Dashboard em tempo real para monitorar ESP32 via MQTT",
+  "main": "api/server.js",
+  "scripts": {
+    "dev": "node api/server.js",
+    "start": "node api/server.js"
+  },
+  "keywords": ["esp32", "mqtt", "dashboard", "iot"],
+  "author": "",
+  "license": "MIT",
+  "dependencies": {
+    "express": "^4.18.2",
+    "mqtt": "^5.3.1",
+    "socket.io": "^4.7.2",
+    "cors": "^2.8.5"
+  },
+  "engines": {
+    "node": ">=18.x"
+  }
+}
+
