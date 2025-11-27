@@ -171,5 +171,5 @@ O sistema monitora e exibe:
 
 ## Vídeo Demo
 
-**Link do vídeo demonstrativo**: [link do víde]
+**Link do vídeo demonstrativo**: [https://youtu.be/-xcDf1lrULQ?si=7Ic9Gk8doywPXMyP]
 
