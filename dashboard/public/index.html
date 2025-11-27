@@ -4,7 +4,6 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Monitor ESP32 - RSSI/dBm</title>
-    <script src="https://cdn.socket.io/4.7.2/socket.io.min.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
     <style>
         * {
@@ -141,7 +140,7 @@
     <div class="container">
         <header>
             <h1>Monitor ESP32</h1>
-            <div id="status" class="status disconnected">Desconectado</div>
+            <div id="status" class="status disconnected">Conectando...</div>
         </header>
 
         <div class="dashboard">
@@ -171,14 +170,6 @@
         const rssiValueEl = document.getElementById('rssiValue');
         const deviceValueEl = document.getElementById('deviceValue');
         const lastUpdateEl = document.getElementById('lastUpdate');
-
-        // Inicializa Socket.IO
-        const socket = io({
-            transports: ['websocket', 'polling'],
-            reconnection: true,
-            reconnectionDelay: 1000,
-            reconnectionAttempts: Infinity
-        });
 
         // Configuração do gráfico
         const ctx = document.getElementById('rssiChart').getContext('2d');
@@ -262,42 +253,13 @@
         // Limitar dados no gráfico (últimos 60 pontos)
         const MAX_DATA_POINTS = 60;
 
-        // Eventos Socket.IO
-        socket.on('connect', () => {
-            console.log('✅ Conectado ao servidor');
-            statusEl.textContent = 'Conectado ao servidor';
-            statusEl.className = 'status connected';
-        });
+        let eventSource = null;
+        let pollInterval = null;
 
-        socket.on('disconnect', () => {
-            console.log('❌ Desconectado do servidor');
-            statusEl.textContent = 'Desconectado';
-            statusEl.className = 'status disconnected';
-        });
-
-        socket.on('connect_error', (error) => {
-            console.error('❌ Erro de conexão:', error);
-            statusEl.textContent = 'Erro na conexão';
-            statusEl.className = 'status disconnected';
-        });
-
-        socket.on('mqtt-status', (data) => {
-            console.log('📡 Status MQTT:', data);
-            if (data.connected) {
-                statusEl.textContent = 'Conectado (MQTT OK)';
-                statusEl.className = 'status connected';
-            } else {
-                statusEl.textContent = 'Aguardando MQTT...';
-                statusEl.className = 'status disconnected';
-            }
-        });
-
-        socket.on('rssi-data', (data) => {
-            console.log('📨 Dados recebidos:', data);
-            updateDashboard(data);
-        });
-
+        // Função para atualizar dashboard
         function updateDashboard(data) {
+            if (!data) return;
+
             // Atualiza valores
             if (data.rssi !== undefined) {
                 rssiValueEl.textContent = data.rssi;
@@ -322,14 +284,108 @@
                 chart.data.datasets[0].data.shift();
             }
 
-            chart.update('none'); // 'none' para animação suave em tempo real
+            chart.update('none');
         }
 
-        // Testa conexão ao carregar
+        // Função para atualizar status
+        function updateStatus(mqttStatus) {
+            if (mqttStatus && mqttStatus.connected) {
+                statusEl.textContent = 'Conectado (MQTT OK)';
+                statusEl.className = 'status connected';
+            } else {
+                statusEl.textContent = 'Aguardando MQTT...';
+                statusEl.className = 'status disconnected';
+            }
+        }
+
+        // Tenta usar Server-Sent Events primeiro
+        function connectSSE() {
+            try {
+                eventSource = new EventSource('/api/stream');
+                
+                eventSource.onmessage = (event) => {
+                    try {
+                        const message = JSON.parse(event.data);
+                        
+                        if (message.type === 'status') {
+                            updateStatus(message.mqtt);
+                        } else if (message.type === 'data' || message.rssi !== undefined) {
+                            updateStatus(message.mqtt);
+                            updateDashboard(message);
+                        }
+                    } catch (error) {
+                        console.error('Erro ao processar mensagem SSE:', error);
+                    }
+                };
+
+                eventSource.onerror = (error) => {
+                    console.warn('Erro SSE, usando polling:', error);
+                    eventSource.close();
+                    connectPolling();
+                };
+
+                eventSource.onopen = () => {
+                    console.log('✅ Conectado via Server-Sent Events');
+                };
+
+            } catch (error) {
+                console.warn('SSE não suportado, usando polling:', error);
+                connectPolling();
+            }
+        }
+
+        // Fallback: Polling HTTP
+        function connectPolling() {
+            console.log('🔄 Usando polling HTTP');
+            
+            pollInterval = setInterval(async () => {
+                try {
+                    const response = await fetch('/api/data');
+                    const result = await response.json();
+                    
+                    if (result.success) {
+                        updateStatus(result.mqtt);
+                        if (result.data) {
+                            updateDashboard(result.data);
+                        }
+                    }
+                } catch (error) {
+                    console.error('Erro ao buscar dados:', error);
+                    statusEl.textContent = 'Erro na conexão';
+                    statusEl.className = 'status disconnected';
+                }
+            }, 1000); // Poll a cada 1 segundo
+
+            // Primeira requisição imediata
+            fetch('/api/data')
+                .then(res => res.json())
+                .then(result => {
+                    if (result.success) {
+                        updateStatus(result.mqtt);
+                        if (result.data) {
+                            updateDashboard(result.data);
+                        }
+                    }
+                })
+                .catch(err => console.error('Erro inicial:', err));
+        }
+
+        // Inicia conexão quando a página carrega
         window.addEventListener('load', () => {
             console.log('🚀 Dashboard carregado');
+            // Tenta SSE primeiro, fallback para polling
+            connectSSE();
+        });
+
+        // Limpa conexões ao fechar a página
+        window.addEventListener('beforeunload', () => {
+            if (eventSource) {
+                eventSource.close();
+            }
+            if (pollInterval) {
+                clearInterval(pollInterval);
+            }
         });
     </script>
 </body>
 </html>
-
